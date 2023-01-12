@@ -1,7 +1,9 @@
 package com.artemissoftware.stockmarket.data.repository
 
+import com.artemissoftware.stockmarket.data.csv.CSVParser
 import com.artemissoftware.stockmarket.data.local.StockDatabase
 import com.artemissoftware.stockmarket.data.mapper.toCompanyListing
+import com.artemissoftware.stockmarket.data.mapper.toCompanyListingEntity
 import com.artemissoftware.stockmarket.data.remote.StockApi
 import com.artemissoftware.stockmarket.domain.models.CompanyListing
 import com.artemissoftware.stockmarket.domain.repository.StockRepository
@@ -16,7 +18,8 @@ import javax.inject.Singleton
 @Singleton
 class StockRepositoryImpl @Inject constructor(
     val api: StockApi,
-    val db: StockDatabase
+    val db: StockDatabase,
+    val companyListingsParser: CSVParser<CompanyListing>
 ): StockRepository {
 
     private val dao = db.dao
@@ -40,13 +43,30 @@ class StockRepositoryImpl @Inject constructor(
             }
             val remoteListings = try {
                 val response = api.getListings()
-
+                companyListingsParser.parse(response.byteStream())
             } catch(e: IOException) {
                 e.printStackTrace()
                 emit(Resource.Error("Couldn't load data"))
+                null
             } catch (e: HttpException) {
                 e.printStackTrace()
                 emit(Resource.Error("Couldn't load data"))
+                null
+            }
+
+            remoteListings?.let { listings ->
+                dao.clearCompanyListings()
+                dao.insertCompanyListings(
+                    listings.map { it.toCompanyListingEntity() }
+                )
+
+                //Always show data from the database
+                emit(Resource.Success(
+                    data = dao
+                        .searchCompanyListing("")
+                        .map { it.toCompanyListing() }
+                ))
+                emit(Resource.Loading(false))
             }
         }
     }
